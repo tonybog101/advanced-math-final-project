@@ -1,0 +1,294 @@
+% MATLAB SCRIPT for Final Project
+% ECE 3309-001: Advanced Mathematics and Linear Algebra
+
+%% Initialize
+
+close all;
+clear all;
+clc;
+
+addpath(genpath(pwd))
+
+%% Load dataset
+
+% Replace with your directory path and file name
+data_dir = 'C:\Users\gateway\Downloads';
+
+% Training Data
+fname_train = 'mnist_train.csv';
+
+M = readmatrix(fullfile(data_dir, fname_train));
+X = M(:, 2:end);
+Y = M(:, 1);
+N = length(Y);
+
+% Testing Data
+fname_test = 'mnist_test.csv';
+
+M_test = readmatrix(fullfile(data_dir, fname_test));
+X_test = M_test(:,2:end);
+Y_test = M_test(:,1);
+N_test = length(Y_test);
+
+% Normalize data
+X = X./255;
+X_test = X_test./255;
+
+
+%% Display dataset
+
+% Display Training data samples
+
+rand_disp = randperm(N, 20);
+
+    figure(10)
+
+    for si = 1:20
+        subplot(4,5,si)
+        imagesc(reshape(X(rand_disp(si),:),28,28)')
+        title(['Digit: ',num2str(Y(rand_disp(si)))])
+        colormap gray
+        axis('square')
+        xticks([])
+        yticks([])
+    end
+drawnow;
+
+
+%% Specify number of hidden units and initialize weights
+
+Ni = size(X, 2);   % Number of input features  (784: one per pixel)
+No = 10;           % Number of output classes   (digits 0–9)
+Nh = 128;          % Number of hidden layer nodes
+
+% Weight / bias dimensions
+%   wh : [Nh x Ni]   hidden-layer weight matrix
+%   wo : [No x Nh]   output-layer weight matrix
+%   bh : [Nh x  1]   hidden-layer bias vector
+%   bo : [No x  1]   output-layer bias vector
+
+[wh, wo, bh, bo] = init_weights(Ni, Nh, No);
+
+
+%% Neural Network Training
+% Run this section (or the whole script) multiple times to keep training.
+
+BZ         = 32;    % Mini-batch size
+EPH        = 30;    % Number of epochs
+lr         = 0.05;  % Learning rate
+save_every = 5;     % Save a checkpoint every N epochs
+
+NB  = floor(N / BZ);
+Err = NaN .* zeros(EPH * NB, 2);   % col 1 = error, col 2 = accuracy
+
+cnt = 1;
+for ep = 1:EPH
+
+    % Shuffle training set each epoch
+    i_rand = randperm(N);
+    XX  = X(i_rand, :);
+    YYY = Y(i_rand);
+
+    for bz = 1:NB
+        ss = (bz - 1) * BZ + 1;
+        ee =  bz      * BZ;
+
+        % One-hot encode the current mini-batch targets
+        T = one_hot(YYY(ss:ee), No);       % [BZ x No]
+
+        % ---- Forward propagation ----
+        [y_hat, H] = forward_pass(XX(ss:ee, :), wh, bh, wo, bo);
+
+        % Batch error (Euclidean distance) and accuracy
+        Err(cnt, 1) = sum(sqrt(sum((T - y_hat).^2, 2))) ./ BZ;
+        Err(cnt, 2) = sum(inv_oneHot(T) == inv_oneHot(y_hat)) ./ BZ;
+
+        % ---- Backpropagation ----
+        [g_wh, g_bh, g_wo, g_bo] = backprop(XX(ss:ee, :), y_hat, T, H, wo, BZ);
+
+        % ---- Gradient descent update ----
+        wh = wh - lr .* g_wh;
+        wo = wo - lr .* g_wo;
+        bh = bh - lr .* g_bh;
+        bo = bo - lr .* g_bo;
+
+        cnt = cnt + 1;
+    end
+
+    % Live training plot (update each epoch)
+    figure(1)
+    yyaxis left
+    plot(Err(:, 2), 'b-')
+    ylabel('Accuracy')
+    ylim([0 1])
+    yyaxis right
+    plot(Err(:, 1), 'r-')
+    ylabel('Error')
+    xlabel('Iteration')
+    title(['Training — Epoch ', num2str(ep), ' / ', num2str(EPH)])
+    legend({'Accuracy', 'Error'}, 'Location', 'best')
+    drawnow;
+
+    % ---- Periodic checkpoint save ----
+    if mod(ep, save_every) == 0
+        fname_ckpt = ['model_epoch', num2str(ep), '.mat'];
+        save(fname_ckpt, 'wh', 'wo', 'bh', 'bo');
+        fprintf('Checkpoint saved: %s\n', fname_ckpt);
+    end
+
+end
+
+% Save final model
+save('model_final.mat', 'wh', 'wo', 'bh', 'bo');
+fprintf('Final model saved: model_final.mat\n');
+
+
+%% Evaluate on Test Set
+
+[yy, ~]  = forward_pass(X_test, wh, bh, wo, bo);
+Y_prd    = inv_oneHot(yy);
+ACC_test = sum(Y_prd == Y_test) ./ N_test * 100;
+fprintf('Testing Accuracy = %.2f %%\n', ACC_test);
+
+% Evaluate on Training Set
+[yy_tr, ~] = forward_pass(X, wh, bh, wo, bo);
+Y_prd_tr   = inv_oneHot(yy_tr);
+ACC_train  = sum(Y_prd_tr == Y) ./ N * 100;
+fprintf('Training Accuracy = %.2f %%\n', ACC_train);
+
+% Display 20 random test predictions
+rand_disp = randperm(N_test, 20);
+
+figure(2)
+for si = 1:20
+    subplot(4, 5, si)
+    imagesc(reshape(X_test(rand_disp(si), :), 28, 28)')
+    title(['T:', num2str(Y_test(rand_disp(si))), ...
+           '  P:', num2str(Y_prd(rand_disp(si)))])
+    colormap gray
+    axis square
+    xticks([])
+    yticks([])
+end
+
+
+%% Export Final Weights to Excel (Group 5)
+
+filename = 'model_weights_group5.xlsx';
+writematrix(wh, filename, 'Sheet', 'wh');
+writematrix(wo, filename, 'Sheet', 'wo');
+writematrix(bh, filename, 'Sheet', 'bh');
+writematrix(bo, filename, 'Sheet', 'bo');
+fprintf('Weights exported to %s\n', filename);
+
+
+%% =========================================================
+%  FUNCTIONS
+%% =========================================================
+
+function [wh, wo, bh, bo] = init_weights(NI, NH, NO)
+% INIT_WEIGHTS  Initialize network parameters.
+%
+%   Uses a uniform distribution in [-0.5, 0.5] so that all values
+%   have moderate magnitude and include both positive and negative
+%   numbers — avoiding symmetry breaking issues.
+%
+%   wh : [NH x NI]   hidden-layer weights
+%   wo : [NO x NH]   output-layer weights
+%   bh : [NH x  1]   hidden-layer biases
+%   bo : [NO x  1]   output-layer biases
+
+    wh = rand(NH, NI) - 0.5;
+    wo = rand(NO, NH) - 0.5;
+    bh = rand(NH,  1) - 0.5;
+    bo = rand(NO,  1) - 0.5;
+end
+
+
+function [y_hat, H] = forward_pass(X, wh, bh, wo, bo)
+% FORWARD_PASS  Two-layer feedforward propagation.
+%
+%   Hidden layer  (sigmoid activation):
+%     S_h   = X * wh' + bh'        [NB x NH]
+%     H     = sigmoid(S_h)          [NB x NH]
+%
+%   Output layer  (softmax activation):
+%     S_o   = H * wo' + bo'         [NB x NO]
+%     y_hat = softmax(S_o)           [NB x NO]
+%
+%   Dimensions:
+%     X     : [NB x NI]
+%     wh    : [NH x NI] => wh'  : [NI x NH]
+%     bh    : [NH x  1] => bh'  : [ 1 x NH]  (broadcast)
+%     wo    : [NO x NH] => wo'  : [NH x NO]
+%     bo    : [NO x  1] => bo'  : [ 1 x NO]  (broadcast)
+
+    % Hidden layer: linear transform + sigmoid
+    S_h   = X * wh' + bh';     % [NB x NH]
+    H     = sigmaa(S_h);       % [NB x NH]
+
+    % Output layer: linear transform + softmax
+    S_o   = H * wo' + bo';     % [NB x NO]
+    y_hat = softmax(S_o);      % [NB x NO]
+end
+
+
+function [g_wh, g_bh, g_wo, g_bo] = backprop(X, y_hat, T, H, wo, BZ)
+% BACKPROP  Compute gradients via backpropagation.
+%
+%   Output-layer error:
+%     Delta = (y_hat - T) / BZ              [NB x NO]
+%
+%   Hidden-layer error (chain rule through sigmoid):
+%     delta = (Delta * wo) .* H .* (1 - H)  [NB x NH]
+%
+%   Gradients:
+%     dE/dwo = Delta' * H                   [NO x NH]
+%     dE/dbo = sum(Delta', 2)               [NO x  1]
+%     dE/dwh = delta' * X                   [NH x NI]
+%     dE/dbh = sum(delta', 2)               [NH x  1]
+
+    % Output layer error
+    Delta = (y_hat - T) ./ BZ;              % [NB x NO]
+
+    % Hidden layer error (backprop through sigmoid)
+    delta = (Delta * wo) .* H .* (1 - H);  % [NB x NH]
+
+    % Output layer gradients
+    g_wo = Delta' * H;                      % [NO x NH]
+    g_bo = sum(Delta', 2);                  % [NO x  1]
+
+    % Hidden layer gradients
+    g_wh = delta' * X;                      % [NH x NI]
+    g_bh = sum(delta', 2);                  % [NH x  1]
+end
+
+
+% ---- Utility functions (do not modify) ----
+
+function z = sigmaa(s)
+% Sigmoid activation function
+    z = 1 ./ (1 + exp(-s));
+end
+
+function ss = softmax(z)
+% Numerically stable softmax (subtract row max before exp)
+    z  = z - max(z, [], 2);        % subtract row-wise max for stability
+    ES = sum(exp(z), 2);
+    ss = exp(z) ./ ES;
+end
+
+function oh = one_hot(y, P)
+% ONE_HOT  Convert label vector to one-hot matrix.
+    N  = length(y);
+    oh = zeros(N, P);
+    for i = 1:N
+        oh(i, y(i) + 1) = 1;
+    end
+end
+
+function P = inv_oneHot(y)
+% INV_ONEHOT  Convert one-hot (or probability) matrix to class labels.
+    [~, P] = max(y, [], 2);
+    P = P - 1;          % shift back to 0-based labels
+end
